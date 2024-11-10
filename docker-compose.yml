@@ -1,40 +1,145 @@
-version: '3.9'
+version: '2'
 
 services:
-  postgres:
-    hostname: postgres
-    image: postgres:latest
+  postgres-master:
+    image: bitnami/postgresql
+    restart: always
     ports:
       - ${DB_PORT}:5432
     volumes:
-      - ./volumes/postgres:/var/lib/postgresql/data
+      - './volumes/postgres-master:/bitnami/postgresql'
+    environment:
+      - POSTGRESQL_PGAUDIT_LOG=READ,WRITE
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASS}
+      - POSTGRES_DB=${DB_NAME}
+      - POSTGRESQL_REPLICATION_MODE=master
+      - POSTGRESQL_REPLICATION_USER=replication_user
+      - POSTGRESQL_REPLICATION_PASSWORD=replication_pass
+      - ALLOW_EMPTY_PASSWORD=yes
+      - POSTGRESQL_MAX_CONNECTIONS=100
+    networks:
+      - app-network
+
+  postgres-replica:
+    image: bitnami/postgresql
+    hostname: postgres-replica
     environment:
       - POSTGRES_USER=${DB_USER}
       - POSTGRES_PASSWORD=${DB_PASS}
       - POSTGRES_DB=${DB_NAME}
-    networks:
-      - app-network
-        
-  app:
-    hostname: app
-    container_name: go-gin-clean-starter
-    build:
-      context: . 
-      dockerfile: Dockerfile
+      - POSTGRES_MASTER_HOST=postgres-master # 設定主庫地址
+      - POSTGRESQL_MASTER_PORT_NUMBER=${DB_PORT}
+      - POSTGRESQL_REPLICATION_MODE=slave
+      - POSTGRESQL_REPLICATION_USER=replication_user
+      - POSTGRESQL_REPLICATION_PASSWORD=replication_pass
     ports:
-      - ${GOLANG_PORT}:8888
-    restart: always
+      - 5433:5432 # 使用不同的端口
+    depends_on:
+      - postgres-master
     volumes:
-      -  ./:/app
-    depends_on: 
-      - postgres
-    env_file:
-      - .env
+      - './volumes/postgres-replica:/bitnami/postgresql'
     networks:
       - app-network
 
+  # app:
+  #   hostname: app
+  #   container_name: go-gin-clean-starter
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - ${GOLANG_PORT}:8888
+  #   restart: always
+  #   volumes:
+  #     - ./volumes/web:/app
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #     - kafka
+  #   env_file:
+  #     - .env
+  #   networks:
+  #     - app-network
+
+  redis:
+    image: redis:latest
+    hostname: redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - ./volumes/redis:/data
+    networks:
+      - app-network
+
+  kafka:
+    image: docker.io/bitnami/kafka:3.8
+    ports:
+      - "9092:9092"
+    volumes:
+      - "./volumes/kafka_data:/bitnami"
+    environment:
+      # KRaft settings
+      - KAFKA_CFG_NODE_ID=0
+      - KAFKA_CFG_PROCESS_ROLES=controller,broker
+      - KAFKA_CFG_CONTROLLER_QUORUM_VOTERS=0@kafka:9093
+      # Listeners
+      - KAFKA_CFG_LISTENERS=PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      - KAFKA_CFG_ADVERTISED_LISTENERS=PLAINTEXT:PLAINTEXT://kafka:9092
+      - KAFKA_CFG_LISTENER_SECURITY_PROTOCOL_MAP=CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      - KAFKA_CFG_CONTROLLER_LISTENER_NAMES=CONTROLLER
+      - KAFKA_CFG_INTER_BROKER_LISTENER_NAME=PLAINTEXT
+    networks:
+      - app-network
+  
+  kafka-ui:
+    container_name: kafka-ui
+    image: provectuslabs/kafka-ui:latest
+    ports:
+      - 8081:8080
+    environment:
+      - KAFKA_CLUSTERS_0_NAME=local
+      - KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS=kafka:9092
+    depends_on:
+      - kafka
+    # volumes:
+      # - ./config/kafka/kafkauiConfig.yml:/etc/kafkaui/dynamic_config.yaml
+    networks:
+      - app-network
+  # drone-server:
+  #   image: drone/drone:0.8
+  #   ports:
+  #     - 80:8000  
+  #     - 9000
+  #   volumes:
+  #     - ./volumes/drone:/var/lib/drone/
+  #   restart: always
+  #   environment:
+  #     - DRONE_OPEN=true
+  #     - DRONE_HOST=Omachi
+  #     - DRONE_GITEA=true
+  #     - DRONE_GITHUB_Host=
+  #     - DRONE_ADMIN=想設定為admin權限的Gitea帳號
+  #     - DRONE_SECRET=pasword
+
+  # drone-agent:
+  #   image: drone/drone:0.8
+  #   command: agent
+  #   restart: always
+  #   depends_on:
+  #     - drone-server 
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock
+  #   environment:
+  #     - DRONE_SERVER=drone-server:9000
+  #     - DRONE_SECRET=pasword
+
 volumes:
   app_vol:
+  redis_data:
+  postgres-master:
+  postgres-replica:
+  kafka_data:
 
 networks:
   app-network:

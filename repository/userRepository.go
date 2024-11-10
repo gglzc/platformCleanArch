@@ -11,8 +11,9 @@ import (
 
 type (
 	UserRepository interface {
+		CreateUser(ctx context.Context, tx *gorm.DB, user entity.User) error
 		GetUser(ctx context.Context, tx *gorm.DB, userID uuid.UUID) (entity.User, error)
-		UpdateBalance(ctx context.Context, tx *gorm.DB, user entity.User , money int64) error
+		UpdateBalance(ctx context.Context, tx *gorm.DB, user entity.User, money int64) error
 	}
 	userRepository struct {
 		db *gorm.DB
@@ -24,6 +25,7 @@ func NewUserRepository(db *gorm.DB) UserRepository {
 		db: db,
 	}
 }
+
 // AddBalance implements UserRepository.
 func (u *userRepository) UpdateBalance(ctx context.Context, tx *gorm.DB, user entity.User, money int64) error {
 	// 開啟交易
@@ -55,12 +57,33 @@ func (u *userRepository) UpdateBalance(ctx context.Context, tx *gorm.DB, user en
 	})
 }
 
-
 // GetUser implements UserRepository.
 func (u *userRepository) GetUser(ctx context.Context, tx *gorm.DB, userID uuid.UUID) (entity.User, error) {
-	panic("unimplemented")
+	var user entity.User
+	err := tx.WithContext(ctx).Where("id = ?", userID).First(&user).Error
+	if err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return entity.User{}, err
+		}
+		return entity.User{}, err
+	}
+	return user, nil
 }
 
+func (u *userRepository) CreateUser(ctx context.Context, tx *gorm.DB, user entity.User) error {
+	err := tx.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(&user).Error; err != nil {
+			return err
+		}
+		//success
+		return nil
+	})
 
+	// 檢查是否有錯誤
+	if err != nil {
+		// 記錄錯誤日誌等
+		return err
+	}
 
-
+	return nil
+}
